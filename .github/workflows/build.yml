@@ -6,89 +6,74 @@ on:
     tags: [ 'v*' ]
   workflow_dispatch:
 
-env:
-  THEOS: $HOME/theos
-  PATH: $HOME/theos/bin:${{ env.PATH }}
-
 jobs:
   build:
     name: Build iOS Tweak
     runs-on: macos-14
     
     steps:
-    - name: Checkout source code
+    - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Install system dependencies
+    - name: Install dependencies
       run: |
         brew install ldid xz
       timeout-minutes: 10
 
-    - name: Setup Theos
+    - name: Install Theos
       run: |
-        git clone --recursive https://github.com/theos/theos.git $THEOS
+        export THEOS=~/theos
+        git clone --recursive https://github.com/theos/theos.git ~/theos
+        echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+        echo "PATH=$HOME/theos/bin:$PATH" >> $GITHUB_ENV
       timeout-minutes: 10
 
-    - name: Install iPhoneOS 16.5 SDK
+    - name: Install iOS SDK
       run: |
         curl -fsSL https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz -o /tmp/sdk.tar.xz
-        mkdir -p $THEOS/sdks
-        tar -xf /tmp/sdk.tar.xz -C $THEOS/sdks
-        ls $THEOS/sdks/
+        mkdir -p $HOME/theos/sdks
+        tar -xf /tmp/sdk.tar.xz -C $HOME/theos/sdks
+        echo "Installed SDKs:"
+        ls $HOME/theos/sdks/
       timeout-minutes: 10
-
-    - name: Fix DEBIAN script permission (solve postinst 644 error)
+    - name: Fix postinst permission
+      run: chmod 755 layout/DEBIAN/postinst
+    - name: Build Tweak
       run: |
-        if [ -f layout/DEBIAN/postinst ]; then
-          chmod 755 layout/DEBIAN/postinst
-          echo "Fixed postinst permission to 755"
-        else
-          echo "postinst file not found, skip permission fix"
-        fi
-
-    - name: Compile & Package Tweak
-      run: |
+        export THEOS=$HOME/theos
+        export PATH=$HOME/theos/bin:$PATH
         make clean
         make package FINALPACKAGE=1 2>&1
-        echo "==== Generated deb files ===="
-        ls -lh packages/
+        echo "Build complete. Packages:"
+        ls -lh packages/ 2>/dev/null || echo "No packages dir"
       timeout-minutes: 15
 
-    - name: Prepare output folder & copy deb
+    - name: Extract dylib
       run: |
         mkdir -p output
-        DEB=$(ls packages/*.deb | head -1)
+        DEB=$(ls packages/*.deb 2>/dev/null | head -1)
         if [ -z "$DEB" ]; then
-          echo "ERROR: No deb package generated!"
+          echo "No deb found!"
           exit 1
         fi
+        echo "Found: $DEB"
         cp "$DEB" output/
-        echo "Copied package: $DEB"
-
-    - name: Extract dylib from deb
-      run: |
         cd output
-        DEB_FILE=$(ls *.deb)
-        # 标准dpkg-deb解压，稳定不报错
-        dpkg-deb -x "$DEB_FILE" extract_tmp
-        # 复制第一个找到的dylib到根目录
-        DYLIB=$(find extract_tmp -name "*.dylib" | head -1)
-        if [ -n "$DYLIB" ]; then
-          cp "$DYLIB" ./VCam.dylib
-          echo "Extracted dylib: $DYLIB"
-        else
-          echo "Warning: No dylib found inside deb"
-        fi
+        ar x ../packages/*.deb 2>/dev/null || dpkg-deb -x "$DEB" .
+        # Try to find dylib in extracted contents
+        find . -name "*.dylib" -exec cp {} ./VCam.dylib \; 2>/dev/null
+        # If ar worked, try tar
+        tar -xf data.tar* 2>/dev/null && find . -name "*.dylib" -exec cp {} ./VCam.dylib \; 2>/dev/null
         ls -lh
 
-    - name: Upload compiled dylib artifact
+    - name: Upload dylib
       uses: actions/upload-artifact@v4
       with:
         name: VCam-dylib
         path: output/VCam.dylib
         retention-days: 30
 
-    - name: Upload deb install package artifact
+    - name: Upload deb
       uses: actions/upload-artifact@v4
       with:
         name: VCam-deb

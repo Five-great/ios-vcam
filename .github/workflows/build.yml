@@ -36,7 +36,8 @@ jobs:
         echo "Installed SDKs:"
         ls $HOME/theos/sdks/
       timeout-minutes: 10
-
+    - name: Fix postinst permissiom
+      run: chmod 755 postinst
     - name: Build Tweak
       run: |
         export THEOS=$HOME/theos

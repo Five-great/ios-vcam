@@ -37,7 +37,10 @@ jobs:
         ls $HOME/theos/sdks/
       timeout-minutes: 10
     - name: Fix postinst permission
-      run: chmod 755 layout/DEBIAN/postinst
+      run: |
+        chmod 755 layout/DEBIAN/postinst
+        chmod 755 layout/DEBIAN/postrm
+        
     - name: Build Tweak
       run: |
         export THEOS=$HOME/theos

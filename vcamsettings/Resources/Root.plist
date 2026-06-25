@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>items</key>
+	<array>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>VCam 设置</string>
+			<key>footerText</key>
+			<string>在任意 App 中点击悬浮按钮选择视频并启用虚拟相机</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.yourname.vcam</string>
+			<key>key</key>
+			<string>enabled</string>
+			<key>label</key>
+			<string>启用虚拟相机</string>
+			<key>PostNotification</key>
+			<string>com.yourname.vcam/prefsChanged</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.yourname.vcam</string>
+			<key>key</key>
+			<string>loopPlayback</string>
+			<key>label</key>
+			<string>循环播放视频</string>
+			<key>PostNotification</key>
+			<string>com.yourname.vcam/prefsChanged</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>操作</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>选择视频</string>
+			<key>action</key>
+			<string>selectVideo</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>重启 SpringBoard</string>
+			<key>action</key>
+			<string>respring</string>
+			<key>confirmation</key>
+			<dict>
+				<key>prompt</key>
+				<string>确定要重启 SpringBoard 吗？</string>
+				<key>title</key>
+				<string>重启</string>
+				<key>okTitle</key>
+				<string>重启</string>
+				<key>cancelTitle</key>
+				<string>取消</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>关于</string>
+			<key>footerText</key>
+			<string>VCam v1.0.0 - 开源虚拟相机插件</string>
+		</dict>
+	</array>
+	<key>title</key>
+	<string>VCam</string>
+</dict>
+</plist>

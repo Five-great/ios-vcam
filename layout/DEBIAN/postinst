@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# 设置权限
+chmod 755 /Library/MobileSubstrate/DynamicLibraries/VCam.dylib
+chmod 644 /Library/MobileSubstrate/DynamicLibraries/VCam.plist
+
+# 重启 SpringBoard 加载插件
+killall -9 SpringBoard
+
+exit 0

@@ -1,0 +1,80 @@
+name: Build VCam
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build iOS Tweak
+    runs-on: macos-14
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        brew install ldid xz
+      timeout-minutes: 10
+
+    - name: Install Theos
+      run: |
+        export THEOS=~/theos
+        git clone --recursive https://github.com/theos/theos.git ~/theos
+        echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+        echo "PATH=$HOME/theos/bin:$PATH" >> $GITHUB_ENV
+      timeout-minutes: 10
+
+    - name: Install iOS SDK
+      run: |
+        curl -fsSL https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz -o /tmp/sdk.tar.xz
+        mkdir -p $HOME/theos/sdks
+        tar -xf /tmp/sdk.tar.xz -C $HOME/theos/sdks
+        echo "Installed SDKs:"
+        ls $HOME/theos/sdks/
+      timeout-minutes: 10
+
+    - name: Build Tweak
+      run: |
+        export THEOS=$HOME/theos
+        export PATH=$HOME/theos/bin:$PATH
+        make clean
+        make package FINALPACKAGE=1 2>&1
+        echo "Build complete. Packages:"
+        ls -lh packages/ 2>/dev/null || echo "No packages dir"
+      timeout-minutes: 15
+
+    - name: Extract dylib
+      run: |
+        mkdir -p output
+        DEB=$(ls packages/*.deb 2>/dev/null | head -1)
+        if [ -z "$DEB" ]; then
+          echo "No deb found!"
+          exit 1
+        fi
+        echo "Found: $DEB"
+        cp "$DEB" output/
+        cd output
+        ar x ../packages/*.deb 2>/dev/null || dpkg-deb -x "$DEB" .
+        # Try to find dylib in extracted contents
+        find . -name "*.dylib" -exec cp {} ./VCam.dylib \; 2>/dev/null
+        # If ar worked, try tar
+        tar -xf data.tar* 2>/dev/null && find . -name "*.dylib" -exec cp {} ./VCam.dylib \; 2>/dev/null
+        ls -lh
+
+    - name: Upload dylib
+      uses: actions/upload-artifact@v4
+      with:
+        name: VCam-dylib
+        path: output/VCam.dylib
+        retention-days: 30
+
+    - name: Upload deb
+      uses: actions/upload-artifact@v4
+      with:
+        name: VCam-deb
+        path: output/*.deb
+        retention-days: 30

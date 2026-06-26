@@ -11,7 +11,7 @@ VCam_CFLAGS = -fobjc-arc
 VCam_CXXFLAGS = -fobjc-arc -std=c++17
 VCam_LDFLAGS = -std=c++17
 VCam_FRAMEWORKS = UIKit AVFoundation CoreMedia CoreVideo CoreImage MobileCoreServices
-VCam_PRIVATE_FRAMEWORKS = 
+VCam_PRIVATE_FRAMEWORKS = AVFCapture
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 

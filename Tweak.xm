@@ -4,14 +4,16 @@
 #import <substrate.h>
 #import "MediaManager.h"
 
-// ===================== 新增：穿透Window =====================
+// 自定义穿透Window（iOS16 有效拦截hitTest）
 @interface VCamOverlayWindow : UIWindow
 @end
 @implementation VCamOverlayWindow
-- (BOOL)isPointInsideWindow:(CGPoint)point {
-    for (UIView *sub in self.rootViewController.view.subviews) {
-        CGRect conv = [sub convertRect:sub.bounds toView:self];
-        if (CGRectContainsPoint(conv, point)) {
+- (BOOL)isPointHitButtonArea:(CGPoint)point {
+    if (!self.rootViewController) return NO;
+    UIView *rootV = self.rootViewController.view;
+    for (UIView *sub in rootV.subviews) {
+        CGRect winRect = [sub convertRect:sub.bounds toView:self];
+        if (CGRectContainsPoint(winRect, point)) {
             return YES;
         }
     }
@@ -19,20 +21,22 @@
 }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (![self isPointInsideWindow:point]) {
+    // 点击不在按钮区域，直接返回nil，触摸穿透下层App
+    if (![self isPointHitButtonArea:point]) {
         return nil;
     }
     return [super hitTest:point withEvent:event];
 }
 @end
 
-// ===================== 新增：穿透根视图 =====================
+// 根视图兜底穿透
 @interface VCamRootView : UIView
 @end
 @implementation VCamRootView
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     for (UIView *sub in self.subviews) {
-        if ([sub pointInside:[self convertPoint:point toView:sub] withEvent:event]) {
+        CGPoint innerP = [self convertPoint:point toView:sub];
+        if ([sub pointInside:innerP withEvent:event]) {
             return sub;
         }
     }
@@ -41,9 +45,8 @@
 @end
 
 // ============================================================================
-// MARK: - 全局状态（完全保留原有代码）
+// MARK: - 全局状态（原版无改动）
 // ============================================================================
-
 static BOOL g_vcamEnabled = NO;
 static UIWindow *g_overlayWindow = nil;
 static UIButton *g_floatButton = nil;
@@ -51,11 +54,9 @@ static UIButton *g_floatButton = nil;
 // ============================================================================
 // MARK: - 悬浮按钮 UI
 // ============================================================================
-
 @interface VCamFloatButton : UIButton
 @property (nonatomic, assign) CGPoint initialCenter;
 @end
-
 @implementation VCamFloatButton
 @end
 
@@ -91,7 +92,7 @@ static void setupFloatButton() {
         initWithTarget:g_floatButton action:@selector(handleTap:)];
     [g_floatButton addGestureRecognizer:tap];
     
-    // 使用自定义穿透Window
+    // iOS16 专用穿透窗口
     g_overlayWindow = [[VCamOverlayWindow alloc] initWithFrame:screen];
     g_overlayWindow.windowLevel = UIWindowLevelStatusBar - 1;
     g_overlayWindow.hidden = NO;
@@ -99,11 +100,10 @@ static void setupFloatButton() {
     
     VCamRootView *rootView = [[VCamRootView alloc] initWithFrame:g_overlayWindow.bounds];
     rootView.backgroundColor = [UIColor clearColor];
-    // 核心：整个根视图不接收触摸，只让按钮接收触摸
+    // 关键：整个背景视图关闭交互，只有按钮可点击
     rootView.userInteractionEnabled = NO;
-    [rootView addSubview:g_floatButton];
-    // 单独开启按钮交互
     g_floatButton.userInteractionEnabled = YES;
+    [rootView addSubview:g_floatButton];
     
     UIViewController *rootVC = [[UIViewController alloc] init];
     rootVC.view = rootView;
@@ -152,7 +152,6 @@ static UIViewController *findTopViewController(void) {
 @end
 
 @implementation VCamImagePickerControllerDelegate
-
 - (void)imagePickerController:(UIImagePickerController *)picker 
         didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey, id> *)info {
     [picker dismissViewControllerAnimated:YES completion:nil];
@@ -172,11 +171,9 @@ static UIViewController *findTopViewController(void) {
         g_floatButton.backgroundColor = [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9];
     }
 }
-
 - (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
     [picker dismissViewControllerAnimated:YES completion:nil];
 }
-
 @end
 
 static VCamImagePickerControllerDelegate *g_pickerDelegate = nil;
@@ -192,7 +189,6 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
     
     [alert addAction:[UIAlertAction actionWithTitle:@"选择视频" 
         style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        
         if (![UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeSavedPhotosAlbum]) {
             return;
         }
@@ -224,16 +220,13 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
         alert.popoverPresentationController.sourceView = gesture.view;
         alert.popoverPresentationController.sourceRect = gesture.view.bounds;
     }
-    
     [topVC presentViewController:alert animated:YES completion:nil];
 }
 
 // ============================================================================
-// MARK: - Hook AVCaptureSession / Video Output（完全原代码无修改）
+// MARK: - Hook AVCapture 原版完全保留
 // ============================================================================
-
 %group VCamHooks
-
 %hook AVCaptureSession
 - (void)startRunning { %orig; }
 - (void)stopRunning { %orig; }
@@ -250,7 +243,6 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
 - (void)captureOutput:(AVCaptureOutput *)output 
     didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer 
            fromConnection:(AVCaptureConnection *)connection {
-    
     if (g_vcamEnabled && [[MediaManager sharedManager] isRunning]) {
         CMSampleBufferRef fakeFrame = [[MediaManager sharedManager] nextVideoFrame];
         if (fakeFrame) {
@@ -275,22 +267,18 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
     %orig;
 }
 %end
-
 %end // VCamHooks group
 
 // ============================================================================
-// MARK: - Constructor（原代码完全不变）
+// MARK: - 构造函数 原版无修改
 // ============================================================================
-
 %ctor {
     @autoreleasepool {
         g_pickerDelegate = [[VCamImagePickerControllerDelegate alloc] init];
-        
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         if (![bundleID isEqualToString:@"com.apple.springboard"]) {
             %init(VCamHooks);
         }
-        
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), 
             dispatch_get_main_queue(), ^{
                 @autoreleasepool {

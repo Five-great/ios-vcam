@@ -223,26 +223,24 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
         }
     }]];
     
-    // 取消按钮清空复位代码
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+        // ========== 弹窗关闭后：恢复低层级，重新开启空白区域穿透 ==========
+        g_overlayWindow.isShowingAlert = NO;
+        g_overlayWindow.windowLevel = UIWindowLevelStatusBar - 1;
+    }]];
     
     if (alert.popoverPresentationController) {
         alert.popoverPresentationController.sourceView = gesture.view;
         alert.popoverPresentationController.sourceRect = gesture.view.bounds;
     }
     
-    // 弹窗完全关闭后统一恢复穿透，所有关闭方式都会触发
-    [topVC presentViewController:alert animated:YES completion:^{
-        g_overlayWindow.isShowingAlert = NO;
-        g_overlayWindow.windowLevel = UIWindowLevelStatusBar - 1;
-    }];
+    [topVC presentViewController:alert animated:YES completion:nil];
 }
 
 // ============================================================================
 // MARK: - Hook AVCapture 原版完全保留
 // ============================================================================
 %group VCamHooks
-
 %hook AVCaptureSession
 - (void)startRunning { %orig; }
 - (void)stopRunning { %orig; }
@@ -259,7 +257,6 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
 - (void)captureOutput:(AVCaptureOutput *)output 
     didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer 
            fromConnection:(AVCaptureConnection *)connection {
-    
     if (g_vcamEnabled && [[MediaManager sharedManager] isRunning]) {
         CMSampleBufferRef fakeFrame = [[MediaManager sharedManager] nextVideoFrame];
         if (fakeFrame) {
@@ -284,22 +281,18 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
     %orig;
 }
 %end
-
 %end // VCamHooks group
 
 // ============================================================================
 // MARK: - 构造函数
 // ============================================================================
-
 %ctor {
     @autoreleasepool {
         g_pickerDelegate = [[VCamImagePickerControllerDelegate alloc] init];
-        
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         if (![bundleID isEqualToString:@"com.apple.springboard"]) {
             %init(VCamHooks);
         }
-        
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), 
             dispatch_get_main_queue(), ^{
                 @autoreleasepool {

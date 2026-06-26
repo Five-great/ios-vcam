@@ -6,7 +6,7 @@
 
 // 自定义穿透Window
 @interface VCamOverlayWindow : UIWindow
-@property (nonatomic, assign) BOOL isShowingAlert; // 标记是否正在弹出弹窗
+@property (nonatomic, assign) BOOL isShowingAlert;
 @end
 @implementation VCamOverlayWindow
 - (BOOL)isPointHitButtonArea:(CGPoint)point {
@@ -22,11 +22,11 @@
 }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // 如果正在弹出Alert，不做穿透拦截，正常接收所有触摸
+    // 弹窗展示期间：不拦截任何触摸，保证ActionSheet可点击
     if (self.isShowingAlert) {
         return [super hitTest:point withEvent:event];
     }
-    // 无弹窗状态：仅按钮区域响应，其余透传
+    // 平时无弹窗：仅按钮区域响应，空白透传底层
     if (![self isPointHitButtonArea:point]) {
         return nil;
     }
@@ -70,7 +70,7 @@ static void handlePanGesture(UIPanGestureRecognizer *gesture);
 static void handleTapGesture(UITapGestureRecognizer *gesture);
 static void resetOverlayWindowState(void);
 
-// 统一恢复浮窗低层级+穿透状态
+// 弹窗完全消失后再执行复位
 static void resetOverlayWindowState() {
     if (!g_overlayWindow) return;
     g_overlayWindow.isShowingAlert = NO;
@@ -192,7 +192,7 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
     UIViewController *topVC = findTopViewController();
     if (!topVC) return;
     
-    // 弹窗前切换高层级，允许点击弹窗
+    // 弹窗前切换高层级，全程保持到弹窗消失
     g_overlayWindow.isShowingAlert = YES;
     g_overlayWindow.windowLevel = UIWindowLevelAlert + 1;
     
@@ -201,23 +201,20 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
         message:g_vcamEnabled ? @"虚拟相机已启用" : @"虚拟相机已关闭"
         preferredStyle:UIAlertControllerStyleActionSheet];
     
-    // 选择视频按钮
+    // 选择视频
     [alert addAction:[UIAlertAction actionWithTitle:@"选择视频" 
         style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         if (![UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeSavedPhotosAlbum]) {
-            resetOverlayWindowState();
             return;
         }
         UIImagePickerController *picker = [[UIImagePickerController alloc] init];
         picker.sourceType = UIImagePickerControllerSourceTypeSavedPhotosAlbum;
         picker.mediaTypes = @[@"public.movie"];
         picker.delegate = g_pickerDelegate;
-        [topVC presentViewController:picker animated:YES completion:^{
-            resetOverlayWindowState();
-        }];
+        [topVC presentViewController:picker animated:YES completion:nil];
     }]];
     
-    // 开关虚拟相机按钮
+    // 开关虚拟相机
     [alert addAction:[UIAlertAction actionWithTitle:g_vcamEnabled ? @"关闭虚拟相机" : @"开启虚拟相机" 
         style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         g_vcamEnabled = !g_vcamEnabled;
@@ -231,27 +228,24 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
         } else {
             [[MediaManager sharedManager] stop];
         }
-        resetOverlayWindowState();
     }]];
     
-    // 取消按钮
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
-        resetOverlayWindowState();
-    }]];
+    // 取消
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     
     if (alert.popoverPresentationController) {
         alert.popoverPresentationController.sourceView = gesture.view;
         alert.popoverPresentationController.sourceRect = gesture.view.bounds;
     }
     
-    // completion兜底：任意方式关闭弹窗都自动恢复穿透
+    // 仅弹窗完全关闭动画结束后再恢复穿透模式
     [topVC presentViewController:alert animated:YES completion:^{
         resetOverlayWindowState();
     }];
 }
 
 // ============================================================================
-// MARK: - Hook AVCapture
+// MARK: - AVCapture Hooks 完全原版无改动
 // ============================================================================
 %group VCamHooks
 %hook AVCaptureSession
@@ -297,7 +291,7 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
 %end
 
 // ============================================================================
-// MARK: - 构造函数
+// MARK: Constructor
 // ============================================================================
 %ctor {
     @autoreleasepool {

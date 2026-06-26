@@ -5,7 +5,25 @@
 #import "MediaManager.h"
 
 // ============================================================================
-// MARK: - 全局状态
+// MARK: - 新增：穿透点击根视图（仅此处改动，保证空白区域透传触摸）
+// ============================================================================
+@interface VCamRootView : UIView
+@end
+
+@implementation VCamRootView
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    // 只拦截悬浮按钮区域，空白处返回nil，触摸穿透到底层
+    for (UIView *sub in self.subviews) {
+        if ([sub pointInside:[self convertPoint:point toView:sub] withEvent:event]) {
+            return sub;
+        }
+    }
+    return nil;
+}
+@end
+
+// ============================================================================
+// MARK: - 全局状态（完全保留原有代码）
 // ============================================================================
 
 static BOOL g_vcamEnabled = NO;
@@ -13,7 +31,7 @@ static UIWindow *g_overlayWindow = nil;
 static UIButton *g_floatButton = nil;
 
 // ============================================================================
-// MARK: - 悬浮按钮 UI
+// MARK: - 悬浮按钮 UI（仅修改setupFloatWindow部分，其余不动）
 // ============================================================================
 
 @interface VCamFloatButton : UIButton
@@ -55,17 +73,22 @@ static void setupFloatButton() {
         initWithTarget:g_floatButton action:@selector(handleTap:)];
     [g_floatButton addGestureRecognizer:tap];
     
+    // ========== 改动1：降低窗口层级，不再遮挡系统弹窗 ==========
     g_overlayWindow = [[UIWindow alloc] initWithFrame:screen];
-    g_overlayWindow.windowLevel = UIWindowLevelAlert + 100;
+    g_overlayWindow.windowLevel = UIWindowLevelStatusBar + 5;
     g_overlayWindow.hidden = NO;
     g_overlayWindow.backgroundColor = [UIColor clearColor];
     
+    // ========== 改动2：使用自定义穿透视图替代普通view ==========
+    VCamRootView *rootView = [[VCamRootView alloc] initWithFrame:g_overlayWindow.bounds];
+    rootView.backgroundColor = [UIColor clearColor];
+    [rootView addSubview:g_floatButton];
+    
     UIViewController *rootVC = [[UIViewController alloc] init];
-    rootVC.view.backgroundColor = [UIColor clearColor];
-    [rootVC.view addSubview:g_floatButton];
+    rootVC.view = rootView;
     g_overlayWindow.rootViewController = rootVC;
     
-    // Register selectors on the button class
+    // 原有动态添加方法逻辑完全保留
     class_addMethod([g_floatButton class], @selector(handlePan:), 
                     (IMP)handlePanGesture, "v@:@");
     class_addMethod([g_floatButton class], @selector(handleTap:), 
@@ -186,7 +209,7 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
 }
 
 // ============================================================================
-// MARK: - Hook AVCaptureSession / Video Output
+// MARK: - Hook AVCaptureSession / Video Output（完全原代码无修改）
 // ============================================================================
 
 %group VCamHooks
@@ -237,7 +260,7 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
 %end // VCamHooks group
 
 // ============================================================================
-// MARK: - Constructor
+// MARK: - Constructor（原代码完全不变）
 // ============================================================================
 
 %ctor {

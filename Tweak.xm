@@ -4,7 +4,7 @@
 #import <substrate.h>
 #import "MediaManager.h"
 
-// ===================== 新增1：穿透Window =====================
+// ===================== 新增：穿透Window =====================
 @interface VCamOverlayWindow : UIWindow
 @end
 @implementation VCamOverlayWindow
@@ -19,7 +19,6 @@
 }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // 不在按钮区域，直接返回nil，事件透传下层窗口
     if (![self isPointInsideWindow:point]) {
         return nil;
     }
@@ -27,7 +26,7 @@
 }
 @end
 
-// ===================== 新增2：穿透根视图（双层保险） =====================
+// ===================== 新增：穿透根视图 =====================
 @interface VCamRootView : UIView
 @end
 @implementation VCamRootView
@@ -92,24 +91,19 @@ static void setupFloatButton() {
         initWithTarget:g_floatButton action:@selector(handleTap:)];
     [g_floatButton addGestureRecognizer:tap];
     
-    // ========== 关键修改1：使用自定义穿透Window 替代原生UIWindow ==========
+    // 使用自定义穿透Window
     g_overlayWindow = [[VCamOverlayWindow alloc] initWithFrame:screen];
-    // 层级降到状态栏下方，完全不抢弹窗
     g_overlayWindow.windowLevel = UIWindowLevelStatusBar - 1;
     g_overlayWindow.hidden = NO;
     g_overlayWindow.backgroundColor = [UIColor clearColor];
     
-    // ========== 关键修改2：透传核心属性 ==========
-    g_overlayWindow.userInteractionEnabled = YES;
-    // iOS 关键属性：允许窗口空白区域忽略交互
-    if (@available(iOS 13.0, *)) {
-        g_overlayWindow.ignoresInteractionExceptSubviews = YES;
-    }
-    
-    // ========== 关键修改3：穿透根视图 ==========
     VCamRootView *rootView = [[VCamRootView alloc] initWithFrame:g_overlayWindow.bounds];
     rootView.backgroundColor = [UIColor clearColor];
+    // 核心：整个根视图不接收触摸，只让按钮接收触摸
+    rootView.userInteractionEnabled = NO;
     [rootView addSubview:g_floatButton];
+    // 单独开启按钮交互
+    g_floatButton.userInteractionEnabled = YES;
     
     UIViewController *rootVC = [[UIViewController alloc] init];
     rootVC.view = rootView;

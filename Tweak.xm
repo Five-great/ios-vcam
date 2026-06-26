@@ -4,8 +4,8 @@
 #import <substrate.h>
 #import "MediaManager.h"
 
-#pragma mark - 全局保存所有App原始相机代理
-static id g_originalVideoDelegate = nil;
+#pragma mark - 全局保存所有App原始相机代理（改用数组防止覆盖）
+static NSMutableArray* g_allVideoDelegates = nil;
 
 #pragma mark - 自定义顶层悬浮窗口类（触摸穿透逻辑不变）
 @interface VCamOverlayWindow : UIWindow
@@ -141,27 +141,30 @@ static UIViewController *findTopViewController(void) {
     return topVC;
 }
 
-#pragma mark - 相册视频选择代理
+#pragma mark - 相册视频选择代理（修复解码延迟+沙盒权限提示）
 @interface VCamImagePickerControllerDelegate : NSObject <UINavigationControllerDelegate, UIImagePickerControllerDelegate>
 @end
 @implementation VCamImagePickerControllerDelegate
 - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey, id> *)info {
     [picker dismissViewControllerAnimated:YES completion:nil];
-    NSURL *url = info[UIImagePickerControllerMediaURL];
-    if (!url) return;
-    NSURL *tempURL = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"vcam_input.mp4"]];
-    [[NSFileManager defaultManager] removeItemAtURL:tempURL error:nil];
-    [[NSFileManager defaultManager] copyItemAtURL:url toURL:tempURL error:nil];
-
-    // 延迟加载等待视频解码
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [[MediaManager sharedManager] loadMediaFromURL:tempURL];
-        g_vcamEnabled = YES;
-        [[MediaManager sharedManager] start];
-        if (g_floatButton) {
-            g_floatButton.backgroundColor = [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9];
-        }
-        NSLog(@"[VCam] 视频加载完成，虚拟相机开启");
+    NSURL *srcUrl = info[UIImagePickerControllerMediaURL];
+    if (!srcUrl) {
+        NSLog(@"[VCam] 未选中视频");
+        return;
+    }
+    // 不拷贝临时文件，直接使用相册原始URL，规避无根沙盒读不到文件
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+        BOOL loadOk = [[MediaManager sharedManager] loadMediaFromURL:srcUrl];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (loadOk) {
+                g_vcamEnabled = YES;
+                [[MediaManager sharedManager] start];
+                if (g_floatButton) g_floatButton.backgroundColor = [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9];
+                NSLog(@"[VCam] 视频加载成功，虚拟相机开启");
+            } else {
+                NSLog(@"[VCam] MediaManager加载视频失败，检查视频格式(MP4 YUV420)");
+            }
+        });
     });
 }
 - (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
@@ -190,10 +193,9 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
 
     [alert addAction:[UIAlertAction actionWithTitle:g_vcamEnabled ? @"关闭虚拟相机" : @"开启虚拟相机" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         g_vcamEnabled = !g_vcamEnabled;
-        if (g_floatButton) {
-            g_floatButton.backgroundColor = g_vcamEnabled ? [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9] : [UIColor colorWithRed:0.4 green:0.4 blue:0.4 alpha:0.9];
-        }
-        g_vcamEnabled ? [[MediaManager sharedManager] start] : [[MediaManager sharedManager] stop];
+        if (g_floatButton) g_floatButton.backgroundColor = g_vcamEnabled ? [UIColor colorWithRed:0.2 green:0.8 blue:0.4 alpha:0.9] : [UIColor colorWithRed:0.4 green:0.4 blue:0.4 alpha:0.9];
+        if (g_vcamEnabled) [[MediaManager sharedManager] start];
+        else [[MediaManager sharedManager] stop];
         NSLog(@"[VCam] 虚拟相机开关切换：%d", g_vcamEnabled);
     }]];
 
@@ -209,42 +211,43 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
     [topVC presentViewController:alert animated:YES completion:nil];
 }
 
-#pragma mark - 核心Hook分组（iOS16 兼容写法）
+#pragma mark - Theos Hook分组（修复代理覆盖、帧推送逻辑）
 %group VCamHooks
 
-// 1、拦截所有AVCaptureVideoDataOutput，捕获App原始代理（关键修复）
+// 1、捕获所有AVCaptureVideoDataOutput代理，存入数组防止覆盖
 %hook AVCaptureVideoDataOutput
 - (void)setSampleBufferDelegate:(id<AVCaptureVideoDataOutputSampleBufferDelegate>)delegate queue:(dispatch_queue_t)queue {
     %orig;
-    // 保存业务App原生代理
-    g_originalVideoDelegate = delegate;
-    NSLog(@"[VCam] 捕获相机原始代理 %@", delegate);
+    if (!g_allVideoDelegates) g_allVideoDelegates = [NSMutableArray array];
+    if (delegate && ![g_allVideoDelegates containsObject:delegate]) {
+        [g_allVideoDelegates addObject:delegate];
+        NSLog(@"[VCam] 新增相机代理 %@", delegate);
+    }
 }
 %end
 
-// 2、兜底拦截所有对象的captureOutput（iOS16唯一通用兼容方案，废弃协议hook）
+// 2、修复核心：先执行原生%orig，再批量推送假帧（解决预览层依旧真实画面）
 %hook NSObject
 - (void)captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection {
-    // 虚拟相机开启且媒体管理器正常运行
-    if (g_vcamEnabled && [[MediaManager sharedManager] isRunning]) {
-        CMSampleBufferRef fakeFrame = [[MediaManager sharedManager] nextVideoFrame];
-        if (fakeFrame) {
-            NSLog(@"[VCam] 成功替换相机帧");
-            // 把伪造帧传给App原始代理
-            if (g_originalVideoDelegate && [g_originalVideoDelegate respondsToSelector:@selector(captureOutput:didOutputSampleBuffer:fromConnection:)]) {
-                [g_originalVideoDelegate captureOutput:output didOutputSampleBuffer:fakeFrame fromConnection:connection];
-            }
-            return;
-        } else {
-            NSLog(@"[VCam] MediaManager无有效视频帧");
+    // 先执行原生逻辑，拿到底层渲染通道
+    %orig;
+
+    if (!g_vcamEnabled || ![[MediaManager sharedManager] isRunning]) return;
+    CMSampleBufferRef fakeFrame = [[MediaManager sharedManager] nextVideoFrame];
+    if (!fakeFrame) {
+        NSLog(@"[VCam] 无可用视频帧");
+        return;
+    }
+    // 遍历全部缓存代理，统一推送假帧，覆盖多层渲染
+    for (id del in g_allVideoDelegates) {
+        if ([del respondsToSelector:@selector(captureOutput:didOutputSampleBuffer:fromConnection:)]) {
+            [del captureOutput:output didOutputSampleBuffer:fakeFrame fromConnection:connection];
         }
     }
-    // 虚拟相机关闭，执行原生逻辑
-    %orig;
+    NSLog(@"[VCam] 成功推送虚拟帧");
 }
 %end
 
-// 无用钩子保留不改动
 %hook AVCaptureSession
 - (void)startRunning { %orig; }
 - (void)stopRunning { %orig; }
@@ -258,19 +261,19 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
 - (void)setSession:(AVCaptureSession *)session { %orig; }
 %end
 
-%end // VCamHooks 分组结束
+%end
 
 #pragma mark - Tweak入口
 %ctor {
     @autoreleasepool {
         g_pickerDelegate = [[VCamImagePickerControllerDelegate alloc] init];
+        g_allVideoDelegates = nil;
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        // 所有非桌面进程加载相机钩子
+        NSLog(@"[VCam] 系统版本：%@ 进程：%@", [[UIDevice currentDevice] systemVersion], bundleID);
         if (![bundleID isEqualToString:@"com.apple.springboard"]) {
             %init(VCamHooks);
-            NSLog(@"[VCam] 已加载相机Hook，进程：%@", bundleID);
+            NSLog(@"[VCam] 相机Hook加载完成");
         }
-        // 延迟创建悬浮UI
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             @autoreleasepool {
                 setupFloatButton();

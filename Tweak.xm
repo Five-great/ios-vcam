@@ -4,15 +4,34 @@
 #import <substrate.h>
 #import "MediaManager.h"
 
-// ============================================================================
-// MARK: - 新增：穿透点击根视图（仅此处改动，保证空白区域透传触摸）
-// ============================================================================
-@interface VCamRootView : UIView
+// ===================== 新增1：穿透Window =====================
+@interface VCamOverlayWindow : UIWindow
+@end
+@implementation VCamOverlayWindow
+- (BOOL)isPointInsideWindow:(CGPoint)point {
+    for (UIView *sub in self.rootViewController.view.subviews) {
+        CGRect conv = [sub convertRect:sub.bounds toView:self];
+        if (CGRectContainsPoint(conv, point)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    // 不在按钮区域，直接返回nil，事件透传下层窗口
+    if (![self isPointInsideWindow:point]) {
+        return nil;
+    }
+    return [super hitTest:point withEvent:event];
+}
 @end
 
+// ===================== 新增2：穿透根视图（双层保险） =====================
+@interface VCamRootView : UIView
+@end
 @implementation VCamRootView
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // 只拦截悬浮按钮区域，空白处返回nil，触摸穿透到底层
     for (UIView *sub in self.subviews) {
         if ([sub pointInside:[self convertPoint:point toView:sub] withEvent:event]) {
             return sub;
@@ -31,7 +50,7 @@ static UIWindow *g_overlayWindow = nil;
 static UIButton *g_floatButton = nil;
 
 // ============================================================================
-// MARK: - 悬浮按钮 UI（仅修改setupFloatWindow部分，其余不动）
+// MARK: - 悬浮按钮 UI
 // ============================================================================
 
 @interface VCamFloatButton : UIButton
@@ -73,13 +92,21 @@ static void setupFloatButton() {
         initWithTarget:g_floatButton action:@selector(handleTap:)];
     [g_floatButton addGestureRecognizer:tap];
     
-    // ========== 改动1：降低窗口层级，不再遮挡系统弹窗 ==========
-    g_overlayWindow = [[UIWindow alloc] initWithFrame:screen];
-    g_overlayWindow.windowLevel = UIWindowLevelStatusBar + 5;
+    // ========== 关键修改1：使用自定义穿透Window 替代原生UIWindow ==========
+    g_overlayWindow = [[VCamOverlayWindow alloc] initWithFrame:screen];
+    // 层级降到状态栏下方，完全不抢弹窗
+    g_overlayWindow.windowLevel = UIWindowLevelStatusBar - 1;
     g_overlayWindow.hidden = NO;
     g_overlayWindow.backgroundColor = [UIColor clearColor];
     
-    // ========== 改动2：使用自定义穿透视图替代普通view ==========
+    // ========== 关键修改2：透传核心属性 ==========
+    g_overlayWindow.userInteractionEnabled = YES;
+    // iOS 关键属性：允许窗口空白区域忽略交互
+    if (@available(iOS 13.0, *)) {
+        g_overlayWindow.ignoresInteractionExceptSubviews = YES;
+    }
+    
+    // ========== 关键修改3：穿透根视图 ==========
     VCamRootView *rootView = [[VCamRootView alloc] initWithFrame:g_overlayWindow.bounds];
     rootView.backgroundColor = [UIColor clearColor];
     [rootView addSubview:g_floatButton];
@@ -88,7 +115,6 @@ static void setupFloatButton() {
     rootVC.view = rootView;
     g_overlayWindow.rootViewController = rootVC;
     
-    // 原有动态添加方法逻辑完全保留
     class_addMethod([g_floatButton class], @selector(handlePan:), 
                     (IMP)handlePanGesture, "v@:@");
     class_addMethod([g_floatButton class], @selector(handleTap:), 
@@ -226,7 +252,6 @@ static void handleTapGesture(UITapGestureRecognizer *gesture) {
 }
 %end
 
-// Intercept frame delegate callback -> substitute with fake frames
 %hook NSObject
 - (void)captureOutput:(AVCaptureOutput *)output 
     didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer 
